@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+    <html>
+    <head>
+      <title>RSSI Position Tracker</title>
+      <style>
+        body { background: white; color: black; text-align: center; font-family: sans-serif; }
+        canvas { background: #222; margin-top: 20px; border: 1px solid #555; }
+        .controls { margin: 20px auto; max-width: 800px; }
+        .upload-panel { background: #f9f9f9; color: #111; padding: 15px; border: 1px solid #ccc; border-radius: 8px; margin-bottom: 20px; }
+        .upload-panel input[type="file"] { display: block; margin: 10px auto; }
+        .upload-panel img { display: block; max-width: 100%; height: auto; margin: 10px auto 0; border: 1px solid #ccc; border-radius: 6px; }
+        .beacon-inputs { display: flex; justify-content: space-around; margin-bottom: 20px; }
+        .beacon-group { background: #333; padding: 15px; border-radius: 8px; }
+        .beacon-group h3 { margin-top: 0; color: orange; }
+        input[type="number"] { width: 60px; padding: 5px; margin: 5px; background: #444; color: white; border: 1px solid #666; }
+        button { background: #444; color: white; border: 1px solid #666; padding: 8px 16px; margin: 5px; cursor: pointer; }
+        button:hover { background: #555; }
+        .distances { background: #333; padding: 15px; border-radius: 8px; margin: 20px auto; max-width: 600px; }
+      </style>
+    </head>
+    <body>
+      <h1>Real-time 3-Anchor RSSI Tracker</h1>
+
+      <div class="controls">
+        <div class="upload-panel">
+          <h3>Háttérkép feltöltése</h3>
+          <input type="file" id="backgroundFile" accept="image/*">
+          <button onclick="useUploadedBackground()">Használ</button>
+          <img id="uploadedImagePreview" alt="Feltöltött háttér" style="display:none;">
+        </div>
+        <div class="beacon-inputs">
+          <div class="beacon-group">
+            <h3>Beacon A1</h3>
+            X: <input type="number" id="a1x" value="0" step="0.1"><br>
+            Y: <input type="number" id="a1y" value="0" step="0.1">
+          </div>
+          <div class="beacon-group">
+            <h3>Beacon A2</h3>
+            X: <input type="number" id="a2x" value="5" step="0.1"><br>
+            Y: <input type="number" id="a2y" value="0" step="0.1">
+          </div>
+          <div class="beacon-group">
+            <h3>Beacon A3</h3>
+            X: <input type="number" id="a3x" value="2.5" step="0.1"><br>
+            Y: <input type="number" id="a3y" value="4.0" step="0.1">
+          </div>
+        </div>
+        <button onclick="updateBeaconPositions()">Frissít Beacon Pozíciók</button>
+        <button onclick="resetBeaconPositions()">Alapértelmezett Pozíciók</button>
+      </div>
+
+      <div class="distances">
+        <h3>Beacon Távolságok</h3>
+        <div id="distanceDisplay">
+          <!-- Távolságok itt jelennek meg -->
+        </div>
+      </div>
+
+      <canvas id="map" width="600" height="500"></canvas>
+      <div id="info"></div>
+
+      <script>
+        const canvas = document.getElementById("map");
+        const ctx = canvas.getContext("2d");
+        let anchors = [[0,0],[5,0],[2.5,4.0]];
+        const scale = 100; // 1 m = 100 px
+        let latestPosition = null;
+        const canvasBackground = new Image();
+        canvasBackground.onload = () => draw();
+
+        function loadSavedBackground() {
+          const saved = localStorage.getItem('mapBackgroundImage');
+          if (saved) {
+            canvasBackground.src = saved;
+            document.getElementById('uploadedImagePreview').src = saved;
+            document.getElementById('uploadedImagePreview').style.display = 'block';
+          }
+        }
+
+        function useUploadedBackground() {
+          const fileInput = document.getElementById('backgroundFile');
+          if (!fileInput.files || !fileInput.files[0]) {
+            alert('Kérlek, válassz egy képet a használathoz.');
+            return;
+          }
+          const file = fileInput.files[0];
+          const reader = new FileReader();
+          reader.onload = function (event) {
+            const imageData = event.target.result;
+            localStorage.setItem('mapBackgroundImage', imageData);
+            canvasBackground.src = imageData;
+            document.getElementById('uploadedImagePreview').src = imageData;
+            document.getElementById('uploadedImagePreview').style.display = 'block';
+            draw();
+          };
+          reader.readAsDataURL(file);
+        }
+
+        function updateBeaconPositions() {
+          anchors[0][0] = parseFloat(document.getElementById('a1x').value);
+          anchors[0][1] = parseFloat(document.getElementById('a1y').value);
+          anchors[1][0] = parseFloat(document.getElementById('a2x').value);
+          anchors[1][1] = parseFloat(document.getElementById('a2y').value);
+          anchors[2][0] = parseFloat(document.getElementById('a3x').value);
+          anchors[2][1] = parseFloat(document.getElementById('a3y').value);
+          updateDistances();
+          draw();
+        }
+
+        function resetBeaconPositions() {
+          document.getElementById('a1x').value = '0';
+          document.getElementById('a1y').value = '0';
+          document.getElementById('a2x').value = '5';
+          document.getElementById('a2y').value = '0';
+          document.getElementById('a3x').value = '2.5';
+          document.getElementById('a3y').value = '4.0';
+          updateBeaconPositions();
+        }
+
+        function calculateDistance(p1, p2) {
+          const dx = p1[0] - p2[0];
+          const dy = p1[1] - p2[1];
+          return Math.sqrt(dx*dx + dy*dy);
+        }
+
+        function updateDistances() {
+          const distances = [];
+          for (let i = 0; i < anchors.length; i++) {
+            for (let j = i + 1; j < anchors.length; j++) {
+              const dist = calculateDistance(anchors[i], anchors[j]);
+              distances.push(`A${i+1}-A${j+1}: ${dist.toFixed(2)} m`);
+            }
+          }
+          document.getElementById('distanceDisplay').innerHTML = distances.join(' | ');
+        }
+
+        function drawAnchors() {
+            ctx.fillStyle = "orange";
+            ctx.font = "16px sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "bottom";
+
+            for (let i = 0; i < anchors.length; i++) {
+                let [x, y] = anchors[i];
+                const px = x * scale + 50;
+                const py = canvas.height - (y * scale + 50);
+                // Anchor pont
+                ctx.beginPath();
+                ctx.arc(px, py, 8, 0, 2 * Math.PI);
+                ctx.fill();
+                // Anchor név
+                ctx.fillText("A" + (i + 1), px, py - 12);
+            }
+        }
+
+        function drawLatestPosition() {
+          if (latestPosition) {
+            const [x, y] = latestPosition;
+            const px = x * scale + 50;
+            const py = canvas.height - (y * scale + 50);
+
+            ctx.fillStyle = "yellow";
+            ctx.beginPath();
+            ctx.arc(px, py, 10, 0, 2 * Math.PI);
+            ctx.fill();
+
+            ctx.strokeStyle = "yellow";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(px - 15, py);
+            ctx.lineTo(px + 15, py);
+            ctx.moveTo(px, py - 15);
+            ctx.lineTo(px, py + 15);
+            ctx.stroke();
+
+            ctx.fillStyle = "white";
+            ctx.font = "12px sans-serif";
+            ctx.fillText("Latest pozíció", px, py - 20);
+          }
+        }
+
+
+        async function draw() {
+          const res = await fetch('/data');
+          const data = await res.json();
+
+          // Latest pozíció beállítása ugyanarra, mint a számított pozíció
+          if (data.x !== undefined && data.y !== undefined) {
+            latestPosition = [data.x, data.y];
+          }
+
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          if (canvasBackground.src) {
+            ctx.drawImage(canvasBackground, 0, 0, canvas.width, canvas.height);
+          }
+          drawAnchors();
+          drawLatestPosition();
+
+          // mozgó pont
+          ctx.beginPath();
+          ctx.arc(data.x*scale+50, canvas.height-(data.y*scale+50), 8, 0, 2*Math.PI);
+          ctx.fillStyle = "lime";
+          ctx.fill();
+
+          // infó kiírás
+          let infoText = `<b>RSSI:</b> ${data.rssi.join(', ')} | 
+             <b>Távolságok (m):</b> ${data.distances.join(', ')} |
+             <b>Számított pozíció:</b> (${data.x.toFixed(2)}, ${data.y.toFixed(2)})`;
+
+          if (latestPosition) {
+            infoText += ` | <b>Saját pozíció:</b> (${latestPosition[0].toFixed(2)}, ${latestPosition[1].toFixed(2)})`;
+          }
+
+          document.getElementById("info").innerHTML = infoText;
+        }
+
+        // Inicializálás
+        loadSavedBackground();
+        updateDistances();
+        setInterval(draw, 1000);
+      </script>
+    </body>
+    </html>
